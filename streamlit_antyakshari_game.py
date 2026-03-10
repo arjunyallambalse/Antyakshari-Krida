@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import tempfile
 from pathlib import Path
 
@@ -51,6 +52,9 @@ def _init_state() -> None:
         "active_settings": None,
         "latest_asr_iast": "",
         "latest_asr_devanagari": "",
+        "latest_asr_error": "",
+        "last_audio_digest": "",
+        "draft_verse_text": "",
         "latest_tts_audio": None,
         "latest_tts_mime": "",
         "latest_tts_error": "",
@@ -73,6 +77,9 @@ def _reset_game() -> None:
     st.session_state["game_over"] = False
     st.session_state["latest_asr_iast"] = ""
     st.session_state["latest_asr_devanagari"] = ""
+    st.session_state["latest_asr_error"] = ""
+    st.session_state["last_audio_digest"] = ""
+    st.session_state["draft_verse_text"] = ""
     st.session_state["latest_tts_audio"] = None
     st.session_state["latest_tts_mime"] = ""
     st.session_state["latest_tts_error"] = ""
@@ -521,7 +528,7 @@ min_similarity = st.sidebar.slider(
 model_path = st.sidebar.text_input("Local ASR model path", value="./model_200_fixed.pth")
 st.sidebar.markdown("---")
 tts_enabled = st.sidebar.checkbox("Computer Voice (YourVoic TTS)", value=False)
-tts_speaker = st.sidebar.text_input("TTS Voice ID", value="rahul")
+tts_speaker = st.sidebar.text_input("TTS Voice ID", value="Deepti")
 tts_pace = st.sidebar.slider("TTS Pace", min_value=0.7, max_value=1.4, value=1.0, step=0.1)
 tts_language_code = "hi-IN"
 yourvoic_api_key = _get_yourvoic_api_key()
@@ -590,13 +597,52 @@ st.subheader("Your Turn")
 audio_bytes = None
 if input_mode == "ASR Recording":
     audio_bytes = st.audio_input("Record your verse")
-    st.caption("You can also manually correct/replace the transcribed text below before submitting.")
+    st.caption("Stop recording to transcribe. You can review/edit the text below before submitting.")
+    if audio_bytes is not None:
+        audio_content = audio_bytes.getvalue()
+        audio_digest = hashlib.sha1(audio_content).hexdigest()
+        if audio_digest != st.session_state.get("last_audio_digest", ""):
+            st.session_state["last_audio_digest"] = audio_digest
+            st.session_state["latest_asr_error"] = ""
+            if not asr_runtime_available():
+                st.session_state["latest_asr_error"] = f"ASR dependencies are missing: {ASR_IMPORT_ERROR}"
+            elif not Path(model_path).exists():
+                st.session_state["latest_asr_error"] = f"ASR model file not found at: {model_path}"
+            else:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+                    temp_audio.write(audio_content)
+                    temp_audio_path = temp_audio.name
+                try:
+                    recognizer = load_asr(str(model_path))
+                    with st.spinner("Transcribing audio..."):
+                        asr_result = recognizer.transcribe_audio_to_devanagari(temp_audio_path)
+                    asr_iast = asr_result["iast"].strip()
+                    asr_devanagari = asr_result["devanagari"].strip()
+                    st.session_state["latest_asr_iast"] = asr_iast
+                    st.session_state["latest_asr_devanagari"] = asr_devanagari
+                    if asr_devanagari:
+                        st.session_state["draft_verse_text"] = asr_devanagari
+                except Exception as exc:  # pragma: no cover - runtime dependent
+                    st.session_state["latest_asr_error"] = f"ASR transcription failed: {exc}"
+                finally:
+                    Path(temp_audio_path).unlink(missing_ok=True)
 
-manual_verse = st.text_area("Verse Text (Devanagari)", height=140, placeholder="धर्मक्षेत्रे कुरुक्षेत्रे ...")
+    if st.session_state.get("latest_asr_error"):
+        st.error(st.session_state["latest_asr_error"])
+    elif st.session_state.get("latest_asr_devanagari"):
+        st.success("ASR text is ready below. Edit if needed, then click Submit Verse.")
+
+manual_verse = st.text_area(
+    "Verse Text (Devanagari)",
+    key="draft_verse_text",
+    height=140,
+    placeholder="धर्मक्षेत्रे कुरुक्षेत्रे ...",
+)
 
 button_col1, button_col2 = st.columns(2)
 submit_turn = button_col1.button("Submit Verse", type="primary", disabled=st.session_state["game_over"])
 pass_turn = button_col2.button("Pass Turn", disabled=st.session_state["game_over"])
+turn_state_changed = False
 
 if pass_turn and not st.session_state["game_over"]:
     _log_event(actor="Player", action="Pass", note="Player passed this turn.")
@@ -612,43 +658,14 @@ if pass_turn and not st.session_state["game_over"]:
         tts_pace=float(tts_pace),
         tts_language_code=tts_language_code,
     )
+    turn_state_changed = True
 
 if submit_turn and not st.session_state["game_over"]:
     raw_user_text = ""
-    asr_iast = ""
-    asr_devanagari = ""
-
-    if input_mode == "ASR Recording" and audio_bytes is not None:
-        if not asr_runtime_available():
-            st.error(f"ASR dependencies are missing: {ASR_IMPORT_ERROR}")
-            st.stop()
-        if not Path(model_path).exists():
-            st.error(f"ASR model file not found at: {model_path}")
-            st.stop()
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-            temp_audio.write(audio_bytes.read())
-            temp_audio_path = temp_audio.name
-
-        try:
-            recognizer = load_asr(str(model_path))
-            with st.spinner("Transcribing audio..."):
-                asr_result = recognizer.transcribe_audio_to_devanagari(temp_audio_path)
-            asr_iast = asr_result["iast"].strip()
-            asr_devanagari = asr_result["devanagari"].strip()
-            st.session_state["latest_asr_iast"] = asr_iast
-            st.session_state["latest_asr_devanagari"] = asr_devanagari
-        except Exception as exc:  # pragma: no cover - runtime dependent
-            st.error(f"ASR transcription failed: {exc}")
-            st.stop()
-        finally:
-            Path(temp_audio_path).unlink(missing_ok=True)
 
     manual_text = manual_verse.strip()
     if manual_text:
         raw_user_text = manual_text
-    elif asr_devanagari:
-        raw_user_text = asr_devanagari
     else:
         st.error("No verse input provided. Record audio or type a verse.")
         st.stop()
@@ -971,6 +988,10 @@ if submit_turn and not st.session_state["game_over"]:
                             target_language_code=tts_language_code,
                         )
                         _update_next_requirement(engine, bot_entry, rule_set)
+    turn_state_changed = True
+
+if turn_state_changed:
+    st.rerun()
 
 if st.session_state["events"]:
     last_event = st.session_state["events"][-1]

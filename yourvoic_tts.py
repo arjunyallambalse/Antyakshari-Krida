@@ -2,14 +2,14 @@ import os
 
 def generate_speech(text: str, output_path: str = "computer_speech.wav") -> str:
     """
-    Generates spoken Sanskrit audio from text using Vagdhenu TTS engine.
+  
     """
     if not text or not text.strip():
         print("Empty text provided for TTS.")
         return ""
 
     try:
-        # Import Vagdhenu engine dynamically from local module
+        # Import Vagdhenu e
         from vagdhenu import VagdhenuTTS
         
         engine = VagdhenuTTS()

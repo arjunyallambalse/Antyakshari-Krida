@@ -9,7 +9,7 @@ try:
         device=0 if torch.cuda.is_available() else -1
     )
 except Exception as e:
-    print(f"Warning: Could not load Sushrota model: {e}")
+    print(f"Could not load Sushrota model: {e}")
     asr_pipeline = None
 
 

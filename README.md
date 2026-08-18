@@ -1,4 +1,4 @@
-# **Optimizing Sanskrit Antyakshari with Directed Graphs**  
+# **Optimizing Sanskrit Antyakshari with Directed Graphs*** 
 _A Competitive and Strategic Tool for Enhanced Play_
 
 ## **Overview**

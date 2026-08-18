@@ -11,7 +11,7 @@ GraphAnalysis_Final.py
 
 This script constructs and analyzes a directed graph representing Sanskrit Antyākṣarī gameplay.
 It processes a dataset of Sanskrit verses, builds a directed graph based on the first and last 
-letters of each verse, and applies advanced graph algorithms for various analyses, including:
+letters of each verse, and applies advanced graph algorithms for various analyses, including.:
 
 1. **Graph Construction**:
    - Nodes represent verses with attributes: first letter, last letter, swara after last, chapter, verse number, and cumulative number.

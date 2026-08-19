@@ -14,8 +14,6 @@ except Exception as e:
 
 
 def transcribe_audio(audio_file_path: str) -> str:
-  
-    def transcribe_audio(audio_file_path: str) -> str:
     if not audio_file_path or not os.path.exists(audio_file_path):
         print(f"File not found: {audio_file_path}")
         return ""

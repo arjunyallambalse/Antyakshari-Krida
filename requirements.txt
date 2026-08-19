@@ -1,6 +1,12 @@
 streamlit
-numpy
+streamlit-audiorecorder
 torch
-torchaudio
+transformers
 soundfile
+librosa
+numpy
+pandas
+networkx
+matplotlib
+scipy
 requests

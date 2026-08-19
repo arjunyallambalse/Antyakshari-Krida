@@ -10,7 +10,7 @@ librosa
 torch
 torchvision
 
-nemo_toolkit[asr]
+nemo_toolkit[asr]==2.4.0
 hydra-core
 omegaconf
 sentencepiece

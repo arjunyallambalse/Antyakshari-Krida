@@ -2,16 +2,19 @@ import os
 import numpy as np
 import torch
 import soundfile as sf
+import librosa
 
-# Load NeMo lazily so Streamlit can start before the model is downloaded.
-_MODEL = None
+from huggingface_hub import hf_hub_download
 
-MODEL_NAME = "prathoshap/sushrota-sanskrit-asr"
+MODEL_REPO = "prathoshap/sushrota-sanskrit-asr"
+MODEL_FILE = "sushrota_sanskrit_asr_v5.nemo"
 
-# Su-srota Sanskrit vocabulary slice
+# Sanskrit slice in the aggregate IndicConformer vocabulary
 OFF = 4096
 VOCAB_SIZE = 256
 BLANK = 5632
+
+_MODEL = None
 
 
 def _load_model():
@@ -20,76 +23,98 @@ def _load_model():
     if _MODEL is not None:
         return _MODEL
 
-    print("Su-srota: loading Sanskrit ASR model...", flush=True)
-
     try:
+        print("Su-srota: downloading/checking model...", flush=True)
+
+        model_path = hf_hub_download(
+            repo_id=MODEL_REPO,
+            filename=MODEL_FILE
+        )
+
+        print(
+            f"Su-srota: model checkpoint = {model_path}",
+            flush=True
+        )
+
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(
+                f"Downloaded model not found: {model_path}"
+            )
+
+        print("Su-srota: importing NeMo...", flush=True)
+
         import nemo.collections.asr as nemo_asr
 
-        _MODEL = nemo_asr.models.ASRModel.from_pretrained(
-            MODEL_NAME
+        print("Su-srota: restoring .nemo checkpoint...", flush=True)
+
+        _MODEL = (
+            nemo_asr.models.EncDecHybridRNNTCTCBPEModel
+            .restore_from(model_path)
         )
 
         _MODEL.eval()
 
-        print("Su-srota: model loaded successfully.", flush=True)
+        print(
+            "Su-srota: model loaded successfully!",
+            flush=True
+        )
 
         return _MODEL
 
     except Exception as e:
         print(
-            f"Su-srota MODEL ERROR: {type(e).__name__}: {e}",
+            f"Su-srota MODEL ERROR: "
+            f"{type(e).__name__}: {e}",
             flush=True
         )
+
         return None
 
 
-def _prepare_audio(audio_file_path):
-    """
-    Read Streamlit recording and convert it to
-    16 kHz mono float32 for Su-srota.
-    """
+def _prepare_audio(path):
+    wav, sr = sf.read(
+        path,
+        dtype="float32"
+    )
 
-    wav, sr = sf.read(audio_file_path, dtype="float32")
-
-    # Convert stereo to mono
+    # Stereo -> mono
     if wav.ndim > 1:
         wav = wav.mean(axis=1)
 
-    # Resample to 16 kHz when necessary
+    # Su-srota expects 16 kHz
     if sr != 16000:
-        import librosa
-
         wav = librosa.resample(
             wav,
             orig_sr=sr,
             target_sr=16000
         )
 
-    wav = np.asarray(wav, dtype=np.float32)
+    wav = np.asarray(
+        wav,
+        dtype=np.float32
+    )
 
     return wav
 
 
-def _greedy_sanskrit_decode(model, wav):
-    """
-    Decode only the Sanskrit token slice of the
-    aggregate IndicConformer vocabulary.
-    """
+def _decode_sanskrit(model, wav):
+
+    device = next(model.parameters()).device
 
     signal = torch.tensor(
         wav,
         dtype=torch.float32
-    ).unsqueeze(0)
+    ).unsqueeze(0).to(device)
 
     signal_length = torch.tensor(
         [len(wav)],
         dtype=torch.long
+    ).to(device)
+
+    print(
+        "Su-srota: running neural network...",
+        flush=True
     )
-
-    device = next(model.parameters()).device
-
-    signal = signal.to(device)
-    signal_length = signal_length.to(device)
 
     with torch.no_grad():
 
@@ -104,24 +129,26 @@ def _greedy_sanskrit_decode(model, wav):
 
     logits = logits.detach().cpu().numpy()
 
-    # Sanskrit vocabulary + CTC blank
+    # Restrict decoding to Sanskrit vocabulary
     columns = [BLANK] + list(
-        range(OFF, OFF + VOCAB_SIZE)
+        range(
+            OFF,
+            OFF + VOCAB_SIZE
+        )
     )
 
-    probabilities = logits[:, columns]
+    P = logits[:, columns]
 
-    # Re-normalize over Sanskrit slice
-    maximum = probabilities.max(
+    maximum = P.max(
         axis=1,
         keepdims=True
     )
 
-    probabilities = probabilities - (
+    P = P - (
         maximum
         + np.log(
             np.exp(
-                probabilities - maximum
+                P - maximum
             ).sum(
                 axis=1,
                 keepdims=True
@@ -129,32 +156,36 @@ def _greedy_sanskrit_decode(model, wav):
         )
     )
 
-    ids = probabilities.argmax(axis=1)
+    ids = P.argmax(axis=1)
 
-    tokenizer = model.tokenizer.tokenizers_dict["sa"]
+    tokenizer = (
+        model.tokenizer
+        .tokenizers_dict["sa"]
+    )
 
-    output_tokens = []
-
+    output = []
     previous = -1
 
-    for token_id in ids:
+    for i in ids:
+        i = int(i)
 
-        token_id = int(token_id)
-
-        # CTC collapse repeated tokens and remove blank
-        if token_id != previous and token_id != 0:
+        # Standard CTC collapse
+        if i != previous and i != 0:
 
             token = tokenizer.ids_to_tokens(
-                [token_id - 1]
+                [i - 1]
             )[0]
 
-            output_tokens.append(token)
+            output.append(token)
 
-        previous = token_id
+        previous = i
 
-    text = "".join(output_tokens)
+    text = "".join(output)
 
-    text = text.replace("▁", " ")
+    text = text.replace(
+        "▁",
+        " "
+    )
 
     return text.strip()
 
@@ -167,19 +198,25 @@ def transcribe_audio(audio_file_path: str) -> str:
     )
 
     if not audio_file_path:
-        print("Su-srota: no audio supplied.", flush=True)
+        print(
+            "Su-srota ERROR: no audio supplied",
+            flush=True
+        )
         return ""
 
     if not os.path.exists(audio_file_path):
         print(
-            f"Su-srota: file missing: {audio_file_path}",
+            f"Su-srota ERROR: file not found: "
+            f"{audio_file_path}",
             flush=True
         )
         return ""
 
     try:
 
-        size = os.path.getsize(audio_file_path)
+        size = os.path.getsize(
+            audio_file_path
+        )
 
         print(
             f"Su-srota: audio size = {size} bytes",
@@ -194,14 +231,21 @@ def transcribe_audio(audio_file_path: str) -> str:
         if model is None:
             return ""
 
-        wav = _prepare_audio(audio_file_path)
-
         print(
-            f"Su-srota: samples = {len(wav)}",
+            "Su-srota: preparing 16 kHz audio...",
             flush=True
         )
 
-        text = _greedy_sanskrit_decode(
+        wav = _prepare_audio(
+            audio_file_path
+        )
+
+        print(
+            f"Su-srota: {len(wav)} samples ready",
+            flush=True
+        )
+
+        text = _decode_sanskrit(
             model,
             wav
         )

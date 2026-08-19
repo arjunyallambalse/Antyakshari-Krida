@@ -1,7 +1,8 @@
 streamlit
 streamlit-audiorecorder
 
-numpy<2
+numpy==1.26.4
+pyarrow<21
 pandas
 scipy
 soundfile
@@ -9,8 +10,10 @@ librosa
 
 torch
 torchvision
+torchaudio
 
-nemo_toolkit[asr]==2.4.0
+nemo_toolkit[asr] @ git+https://github.com/AI4Bharat/NeMo.git@nemo-v2
+
 hydra-core
 omegaconf
 sentencepiece

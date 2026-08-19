@@ -810,36 +810,51 @@ with st.sidebar:
 
     st.divider()
 
-    st.subheader(
-        "📊 Scoreboard"
-    )
+st.subheader(
+    "📊 Game Tally"
+)
 
-    score_a, score_b = (
-        st.columns(2)
-    )
+score_a, score_b = st.columns(2)
 
-    score_a.metric(
-        "Player",
-        st.session_state.player_score,
-    )
+score_a.metric(
+    "Player Verses",
+    st.session_state.player_score,
+)
 
-    score_b.metric(
-        "Computer",
-        st.session_state.computer_score,
-    )
+score_b.metric(
+    "Computer Verses",
+    st.session_state.computer_score,
+)
 
-    chances_left = max(
-        0,
-        MAX_CHANCES
-        - st.session_state.chances_lost
-    )
+total_chain = (
+    st.session_state.player_score
+    + st.session_state.computer_score
+)
 
-    st.caption(
-        f"Chances remaining: "
-        f"{chances_left}/"
-        f"{MAX_CHANCES}"
-    )
+st.metric(
+    "🔗 Chain Length",
+    total_chain,
+)
 
+chances_left = max(
+    0,
+    MAX_CHANCES
+    - st.session_state.chances_lost
+)
+
+hearts = (
+    "❤️" * chances_left
+    + "🖤" * st.session_state.chances_lost
+)
+
+st.markdown(
+    f"**Chances:** {hearts}"
+)
+
+st.caption(
+    "Keep the Antyakshari chain alive "
+    "for as many verses as possible."
+)
     st.divider()
 
     tts_ready = (
